@@ -1,9 +1,9 @@
 {
-  "short_name": "PM Connect",
+  "short_name": "Connect",
   "name": "Parque Melilla Connect",
   "icons": [
     {
-      "src": "/logo.png",
+      "src": "/logo-cuadrado.png",
       "sizes": "192x192 512x512",
       "type": "image/png",
       "purpose": "any maskable"
@@ -12,5 +12,5 @@
   "start_url": "/",
   "display": "standalone",
   "theme_color": "#204136",
-  "background_color": "#204136"
+  "background_color": "#F8F9FA"
 }
