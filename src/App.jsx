@@ -20,6 +20,9 @@ const CandadoIcon = ({ size = 14, className = "" }) => (
   </svg>
 );
 
+// Zonas habituales de rondas diarias
+const ZONAS_HABITUALES = ['Aseos Galería P0', 'Pasillo Principal', 'Parking Subterráneo'];
+
 // --- HELPER RGPD: OBTENCIÓN SEGURA DE FOTOS MEDIANTE URL FIRMADA (Art. 32 LOPD-GDD) ---
 export const obtenerUrlSegura = async (rutaArchivo) => {
   if (!rutaArchivo) return null;
@@ -104,10 +107,11 @@ export function App() {
   const [observaciones, setObservaciones] = useState('');
   const [motivoPendiente, setMotivoPendiente] = useState('');
 
-  // Control Horario y Checklist
-  const [showFichajeModal, setShowFichajeModal] = useState(false);
-  const [estadoFichaje, setEstadoFichaje] = useState(null); 
-  const [rondasPendientes, setRondasPendientes] = useState([]);
+  // Checklist Operativo y Rondas
+  const [showModalRonda, setShowModalRonda] = useState(false);
+  const [rondaFormZona, setRondaFormZona] = useState(ZONAS_HABITUALES[0]);
+  const [rondaFormOperario, setRondaFormOperario] = useState('');
+  const [rondaFormHora, setRondaFormHora] = useState('');
 
   // Parte Diario de Seguridad
   const [showParteSeguridad, setShowParteSeguridad] = useState(false);
@@ -190,7 +194,7 @@ export function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) cargarPerfil(session.user);
-      else { setUserProfile(null); setEstadoFichaje(null); }
+      else { setUserProfile(null); }
       setLoadingSession(false);
     });
     return () => subscription.unsubscribe();
@@ -200,7 +204,7 @@ export function App() {
     e.preventDefault();
     setIsLoggingIn(true); setLoginError('');
     const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: loginPassword });
-    if (error) setLoginError('Credenciales incorrectas.');
+    if (error) setLoginError(error.message === 'Invalid login credentials' ? 'Credenciales incorrectas.' : `Error de conexión: ${error.message}`);
     setIsLoggingIn(false);
   };
   
@@ -251,6 +255,20 @@ export function App() {
   const esLimpieza = miRol === 'Limpieza';
   const esSeguridad = miRol === 'Seguridad';
   const esGerente = miRol === 'Gerencia';
+
+  // Lógica de cálculo de Rondas Diarias para la fecha actual
+  const esFechaDeHoy = (fechaStr) => {
+    if (!fechaStr) return false;
+    const f = new Date(fechaStr);
+    const hoy = new Date();
+    return f.getFullYear() === hoy.getFullYear() &&
+           f.getMonth() === hoy.getMonth() &&
+           f.getDate() === hoy.getDate();
+  };
+
+  const rondasDeHoy = checklistHistorial.filter(r => esFechaDeHoy(r.fecha));
+  const zonasCompletadasHoy = rondasDeHoy.map(r => r.zona);
+  const zonasPendientesHoy = ZONAS_HABITUALES.filter(z => !zonasCompletadasHoy.includes(z));
 
   const abrirModalParte = async () => {
     const { turnoDefault, fechaISO } = getTurnoYFechaOperativa();
@@ -428,37 +446,57 @@ export function App() {
     if (!resultado) return;
     setIsScanning(false);
     if (resultado === 'CONTROL_HORARIO') {
-      if (esLimpieza) setShowFichajeModal(true);
-      else alert('Control horario restringido al personal de Limpieza.');
+      alert('El control horario ya no está activo.');
     } else {
-      if (esLimpieza && !estadoFichaje) return alert('Debes iniciar turno antes de registrar avisos.');
       setZonaNombre(resultado);
       setShowForm(true);
     }
   };
 
-  const registrarFichaje = async (tipo) => {
-    setIsSubmitting(true);
+  const abrirModalRegistroRonda = (zona = '') => {
     const ahora = new Date();
-    const registro = { id: Date.now().toString(), departamento: `Limpieza - ${userProfile?.nombre_completo || userProfile?.email}`, tipo_registro: tipo, fecha_hora: ahora.toISOString() };
-    if (tipo === 'ENTRADA') {
-      setEstadoFichaje(ahora); setRondasPendientes(['Aseos Galería P0', 'Pasillo Principal', 'Parking Subterráneo']);
-      alert(`Entrada: ${ahora.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-    } else {
-      setEstadoFichaje(null); setRondasPendientes([]); alert('Salida registrada.');
-    }
-    if (isOnline) try { await supabase.from('fichajes').insert([{ departamento: registro.departamento, tipo_registro: tipo }]); } catch (err) {}
-    setHistorialFichajes(prev => [registro, ...prev]);
-    setShowFichajeModal(false); setIsSubmitting(false);
+    const horaActual = `${String(ahora.getHours()).padStart(2, '0')}:${String(ahora.getMinutes()).padStart(2, '0')}`;
+    setRondaFormZona(zona || (zonasPendientesHoy[0] || ZONAS_HABITUALES[0]));
+    setRondaFormOperario('');
+    setRondaFormHora(horaActual);
+    setShowModalRonda(true);
   };
 
-  const completarRonda = async (zona) => {
-    const ahora = new Date().toISOString();
-    const registroRonda = { id: Date.now().toString(), zona, operario: userProfile?.nombre_completo || 'Operario', departamento: miRol, estado: 'Conforme / OK', fecha: ahora };
-    setRondasPendientes(prev => prev.filter(r => r !== zona));
-    if (isOnline) try { await supabase.from('rondas_checklist').insert([registroRonda]); } catch (err) {}
-    setChecklistHistorial(prev => [registroRonda, ...prev]);
-    alert(`✅ Revisión de ${zona} registrada.`);
+  const guardarRegistroRonda = async (e) => {
+    e.preventDefault();
+    if (!rondaFormZona.trim() || !rondaFormOperario.trim() || !rondaFormHora.trim()) {
+      return alert('Indica la zona, el nombre del operario y la hora en que se realizó la ronda.');
+    }
+
+    setIsSubmitting(true);
+    try {
+      const [h, m] = rondaFormHora.split(':');
+      const ahora = new Date();
+      ahora.setHours(parseInt(h, 10), parseInt(m, 10), 0, 0);
+
+      const nuevoRegistro = {
+        id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
+        zona: rondaFormZona.trim(),
+        operario: rondaFormOperario.trim(),
+        departamento: 'Limpieza',
+        estado: 'Conforme / OK',
+        fecha: ahora.toISOString()
+      };
+
+      if (isOnline) {
+        const { error } = await supabase.from('rondas_checklist').insert([nuevoRegistro]);
+        if (error) throw error;
+      }
+
+      setChecklistHistorial(prev => [nuevoRegistro, ...prev]);
+      setShowModalRonda(false);
+      setRondaFormOperario('');
+      alert(`✅ Ronda de "${rondaFormZona}" registrada: Operario ${rondaFormOperario.trim()} a las ${rondaFormHora}.`);
+    } catch (err) {
+      alert(`❌ Error al registrar ronda: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handlePhotoCapture = (e, setFile, setPreview) => {
@@ -488,7 +526,6 @@ export function App() {
   };
 
   const abrirFicha = async (inc) => {
-    if (esLimpieza && !estadoFichaje) return alert('Debes iniciar turno para ver los detalles.');
     setIncidenciaSeleccionada(inc); setAccionActiva(null); setMotivoPendiente(''); setObservaciones(''); setFotoDespuesFile(null); setFotoDespuesPreview(null); setChatMessages([]);
     
     const totalComentarios = inc.comentarios ? inc.comentarios.length : 0;
@@ -590,6 +627,41 @@ export function App() {
             <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Correo electrónico</label><input type="email" required value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} className="w-full border rounded-lg p-3 text-sm outline-none focus:border-pm-verde" /></div>
             <div><label className="block text-xs font-bold text-gray-500 mb-1 uppercase">Contraseña</label><input type="password" required value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} className="w-full border rounded-lg p-3 text-sm outline-none focus:border-pm-verde" /></div>
             <button type="submit" disabled={isLoggingIn} className="w-full bg-pm-ocre hover:bg-amber-600 text-white font-bold py-3.5 rounded-xl shadow-md flex justify-center items-center gap-2 transition-all">{isLoggingIn ? 'Accediendo...' : <><LogIn size={18} /> Iniciar Sesión</>}</button>
+
+            {/* Accesos rápidos de prueba */}
+            <div className="pt-2 border-t">
+              <p className="text-[10px] font-bold text-gray-400 uppercase text-center mb-2">Accesos directos de prueba</p>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => { setLoginEmail('vgarcia@lyc-consultores.com'); setLoginPassword('12345678'); }}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
+                >
+                  👑 Virginia (Gerencia)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLoginEmail('gerencia@test.com'); setLoginPassword('12345678'); }}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
+                >
+                  🏢 Gerencia Test
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLoginEmail('limpieza@test.com'); setLoginPassword('12345678'); }}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
+                >
+                  🧹 Limpieza Test
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setLoginEmail('seguridad@test.com'); setLoginPassword('12345678'); }}
+                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
+                >
+                  🛡️ Seguridad Test
+                </button>
+              </div>
+            </div>
           </form>
 
           {/* --- ACTUALIZACIÓN RGPD: Cláusula informativa Art.13 LOPD --- */}
@@ -632,7 +704,6 @@ export function App() {
                 <h1 className="text-lg font-bold">CONNECT</h1>
               </div>
               <div className="flex items-center gap-3">
-                {esLimpieza && (estadoFichaje ? <span className="text-[10px] font-bold bg-green-500/30 px-3 py-1 rounded-full border border-green-400">EN TURNO</span> : <span className="text-[10px] font-bold bg-red-500/30 px-3 py-1 rounded-full border border-red-400">FUERA DE TURNO</span>)}
                 <button onClick={handleLogout} className="bg-white/10 hover:bg-white/20 p-2 rounded-lg text-white"><LogOut size={16} /></button>
               </div>
             </div>
@@ -643,13 +714,6 @@ export function App() {
           </header>
 
           <main className="p-4 space-y-4 max-w-lg mx-auto">
-            {esLimpieza && (
-              <div className="bg-amber-50 p-3 rounded-xl border border-amber-100 flex justify-between items-center shadow-sm">
-                <p className="text-xs text-amber-800 font-bold flex items-center gap-1.5"><Clock size={16} /> Control Horario</p>
-                <button onClick={() => setShowFichajeModal(true)} className="bg-white border text-amber-700 px-3 py-1.5 rounded text-[10px] font-bold shadow-sm">Fichar</button>
-              </div>
-            )}
-
             {esSeguridad && (
               <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-md">
                 <div className="flex justify-between items-start mb-2">
@@ -663,23 +727,74 @@ export function App() {
               </div>
             )}
 
-            {esLimpieza && estadoFichaje && rondasPendientes.length > 0 && (
-              <div className="bg-green-50 rounded-xl p-4 border border-green-200 mt-2 shadow-sm">
-                <h2 className="font-bold text-sm text-green-800 flex items-center gap-1.5 mb-3"><CheckSquare size={16} /> Rondas Diarias (Pendientes)</h2>
+            {(esLimpieza || esGerente) && (
+              <div className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm mt-2">
+                <div className="flex justify-between items-center mb-3">
+                  <div>
+                    <h2 className="font-bold text-sm text-gray-800 flex items-center gap-1.5">
+                      <CheckSquare size={16} className="text-pm-verde" /> Rondas Diarias de Limpieza
+                    </h2>
+                    <p className="text-[11px] text-gray-500">Supervisión diaria antes de finalizar la jornada.</p>
+                  </div>
+                  <button 
+                    onClick={() => abrirModalRegistroRonda()} 
+                    className="bg-pm-verde hover:bg-green-700 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow-sm transition"
+                  >
+                    <Plus size={13}/> Registrar
+                  </button>
+                </div>
+
+                {zonasPendientesHoy.length > 0 ? (
+                  <div className="bg-amber-50 text-amber-800 text-xs px-3 py-2 rounded-lg border border-amber-200 font-medium mb-3 flex items-center gap-1.5">
+                    <AlertTriangle size={14} className="text-pm-ocre shrink-0"/>
+                    <span>⚠️ Pendientes hoy: <strong>{zonasPendientesHoy.join(', ')}</strong></span>
+                  </div>
+                ) : (
+                  <div className="bg-green-50 text-green-800 text-xs px-3 py-2 rounded-lg border border-green-200 font-medium mb-3 flex items-center gap-1.5">
+                    <CheckCircle size={14} className="text-green-600 shrink-0"/>
+                    <span>Todas las rondas de hoy han sido verificadas.</span>
+                  </div>
+                )}
+
                 <div className="space-y-2">
-                  {rondasPendientes.map(zona => (
-                    <div key={zona} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-green-100 shadow-sm">
-                      <span className="text-xs font-bold text-gray-700">{zona}</span>
-                      <button onClick={() => completarRonda(zona)} className="bg-green-600 text-white px-3 py-1.5 rounded text-[10px] font-bold"><Check size={12}/> Revisar</button>
-                    </div>
-                  ))}
+                  {ZONAS_HABITUALES.map(zona => {
+                    const rondaHecha = rondasDeHoy.find(r => r.zona === zona);
+                    if (rondaHecha) {
+                      const horaHecha = new Date(rondaHecha.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      return (
+                        <div key={zona} className="flex justify-between items-center bg-green-50/60 p-2.5 rounded-lg border border-green-200 text-xs">
+                          <div>
+                            <span className="font-bold text-gray-800">{zona}</span>
+                            <p className="text-[11px] text-gray-600 mt-0.5">Operario: <strong className="text-green-800">{rondaHecha.operario}</strong> • {horaHecha}</p>
+                          </div>
+                          <span className="bg-green-100 text-green-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-300 flex items-center gap-1">
+                            <Check size={11}/> Conforme
+                          </span>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div key={zona} className="flex justify-between items-center bg-gray-50 p-2.5 rounded-lg border border-gray-200 text-xs">
+                        <div>
+                          <span className="font-semibold text-gray-700">{zona}</span>
+                          <p className="text-[10px] text-gray-400">Sin registrar hoy</p>
+                        </div>
+                        <button 
+                          onClick={() => abrirModalRegistroRonda(zona)} 
+                          className="bg-pm-ocre hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm transition"
+                        >
+                          Registrar
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
 
             <div className="flex justify-between items-center pt-2">
               <h2 className="font-bold text-lg text-pm-verde flex items-center gap-2"><AlertTriangle size={18} className="text-pm-ocre" /> Tareas Asignadas</h2>
-              <button onClick={() => { if (esLimpieza && !estadoFichaje) alert('Debes iniciar turno.'); else { setZonaNombre(''); setDepartamentoDestino(''); setShowForm(true); } }} className="text-xs font-bold text-pm-ocre underline">+ Dar Aviso</button>
+              <button onClick={() => { setZonaNombre(''); setDepartamentoDestino(''); setShowForm(true); }} className="text-xs font-bold text-pm-ocre underline">+ Dar Aviso</button>
             </div>
             
             {incidenciasList.filter(i => i.estado !== 'Resuelta' && (i.departamento_destino === miRol || i.departamento_destino === 'General' || !i.departamento_destino)).map((inc) => {
@@ -706,7 +821,7 @@ export function App() {
           </main>
 
           <div className="fixed bottom-20 left-0 right-0 flex justify-center px-4 z-10">
-            <button onClick={() => { if (esLimpieza && !estadoFichaje) alert('Debes iniciar turno.'); else setIsScanning(true); }} className="w-full max-w-sm py-4 rounded-2xl shadow-lg font-bold text-lg flex items-center justify-center gap-2 bg-pm-ocre text-white"><Camera size={24} /> ESCANEAR QR AVISO</button>
+            <button onClick={() => setIsScanning(true)} className="w-full max-w-sm py-4 rounded-2xl shadow-lg font-bold text-lg flex items-center justify-center gap-2 bg-pm-ocre text-white"><Camera size={24} /> ESCANEAR QR AVISO</button>
           </div>
         </>
       )}
@@ -745,14 +860,87 @@ export function App() {
               <div className="bg-white p-4 rounded-xl border shadow-sm flex flex-col justify-between"><div className="flex justify-between items-start"><span className="text-xs font-bold text-gray-500 uppercase">Alertas Críticas</span><span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"></span></div><p className="text-3xl font-extrabold text-red-600 my-1">{incidenciasList.filter(i => i.prioridad?.includes('P1') && i.estado !== 'Resuelta').length}</p></div>
               <div className="bg-white p-4 rounded-xl border shadow-sm flex flex-col justify-between"><span className="text-xs font-bold text-gray-500 uppercase">Avisos Abiertos</span><p className="text-3xl font-extrabold text-amber-500 my-1">{incidenciasList.filter(i => i.estado !== 'Resuelta').length}</p></div>
               <div className="bg-white p-4 rounded-xl border shadow-sm flex flex-col justify-between"><span className="text-xs font-bold text-gray-500 uppercase">Avisos Resueltos</span><p className="text-3xl font-extrabold text-green-600 my-1">{incidenciasList.filter(i => i.estado === 'Resuelta').length}</p></div>
-              <div className="bg-white p-4 rounded-xl border shadow-sm flex flex-col justify-between"><span className="text-xs font-bold text-gray-500 uppercase">Rondas Verificadas</span><p className="text-3xl font-extrabold text-pm-verde my-1">{checklistHistorial.length}</p></div>
+              <div className="bg-white p-4 rounded-xl border shadow-sm flex flex-col justify-between">
+                <div className="flex justify-between items-start">
+                  <span className="text-xs font-bold text-gray-500 uppercase">Rondas Hoy</span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${zonasPendientesHoy.length === 0 ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>
+                    {zonasPendientesHoy.length === 0 ? 'Completadas' : `${zonasPendientesHoy.length} pendientes`}
+                  </span>
+                </div>
+                <p className="text-3xl font-extrabold text-pm-verde my-1">{rondasDeHoy.length} <span className="text-sm font-normal text-gray-400">/ {ZONAS_HABITUALES.length}</span></p>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <div className="space-y-6">
+                {/* PANEL SUPERVISIÓN RONDAS DIARIAS */}
                 <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
-                  <div className="bg-gray-50 px-4 py-3 border-b flex items-center gap-2"><Clock size={16} className="text-pm-ocre" /><h3 className="text-xs font-bold text-gray-700 uppercase">Control Horario</h3></div>
-                  <div className="p-3 max-h-56 overflow-y-auto space-y-2">
+                  <div className="bg-gray-50 px-4 py-3 border-b flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                      <CheckSquare size={16} className="text-pm-verde" />
+                      <h3 className="text-xs font-bold text-gray-700 uppercase">Rondas Diarias Limpieza</h3>
+                    </div>
+                    <button 
+                      onClick={() => abrirModalRegistroRonda()} 
+                      className="bg-pm-verde hover:bg-green-700 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-sm transition"
+                    >
+                      <Plus size={12}/> Registrar
+                    </button>
+                  </div>
+
+                  <div className="p-3 space-y-3">
+                    {zonasPendientesHoy.length > 0 ? (
+                      <div className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded-lg text-xs flex items-center justify-between">
+                        <span className="font-medium">⚠️ Quedan <strong>{zonasPendientesHoy.length}</strong> rondas pendientes hoy</span>
+                        <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded-full">Pendiente</span>
+                      </div>
+                    ) : (
+                      <div className="bg-green-50 border border-green-200 text-green-800 p-2.5 rounded-lg text-xs flex items-center gap-1.5 font-medium">
+                        <CheckCircle size={14} className="text-green-600 shrink-0"/>
+                        <span>Todas las rondas de hoy han sido verificadas.</span>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      {ZONAS_HABITUALES.map(zona => {
+                        const rondaHecha = rondasDeHoy.find(r => r.zona === zona);
+                        if (rondaHecha) {
+                          const horaStr = new Date(rondaHecha.fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          return (
+                            <div key={zona} className="p-2.5 bg-green-50/50 rounded-lg border border-green-200 flex justify-between items-center text-xs">
+                              <div>
+                                <p className="font-bold text-gray-800">{zona}</p>
+                                <p className="text-[11px] text-gray-600 mt-0.5">Operario: <strong className="text-green-800">{rondaHecha.operario}</strong> • {horaStr}</p>
+                              </div>
+                              <span className="bg-green-100 text-green-800 font-bold text-[10px] px-2 py-0.5 rounded-full border border-green-300">
+                                ✓ Conforme
+                              </span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={zona} className="p-2.5 bg-gray-50 rounded-lg border border-gray-200 flex justify-between items-center text-xs">
+                            <div>
+                              <p className="font-semibold text-gray-700">{zona}</p>
+                              <p className="text-[10px] text-gray-400">Pendiente registrar operario/hora</p>
+                            </div>
+                            <button 
+                              onClick={() => abrirModalRegistroRonda(zona)} 
+                              className="bg-pm-ocre hover:bg-amber-600 text-white font-bold text-[10px] px-2.5 py-1 rounded shadow-sm transition"
+                            >
+                              Incluir
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Histórico Control Horario anterior */}
+                <div className="bg-white border rounded-xl shadow-sm overflow-hidden">
+                  <div className="bg-gray-50 px-4 py-3 border-b flex items-center gap-2"><Clock size={16} className="text-pm-ocre" /><h3 className="text-xs font-bold text-gray-700 uppercase">Control Horario (Histórico)</h3></div>
+                  <div className="p-3 max-h-48 overflow-y-auto space-y-2">
                     {historialFichajes.map((fich) => (
                       <div key={fich.id} className="flex justify-between items-center text-xs border-b pb-2"><p className="font-semibold text-gray-800">{fich.departamento} <span className={`ml-1 text-[9px] px-1.5 py-0.5 rounded font-bold ${fich.tipo_registro === 'ENTRADA' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{fich.tipo_registro}</span></p><span className="text-gray-500 font-mono text-[11px]">{new Date(fich.fecha_hora).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>
                     ))}
@@ -1029,13 +1217,75 @@ export function App() {
         </div>
       )}
 
-      {showFichajeModal && (
+
+      {/* MODAL REGISTRO DE RONDA DIARIA (SUPERVISOR) */}
+      {showModalRonda && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-2xl p-6 text-center space-y-4">
-            <h2 className="text-xl font-bold">Control Horario</h2>
-            {!estadoFichaje ? <button onClick={() => registrarFichaje('ENTRADA')} className="w-full bg-pm-verde text-white font-bold py-4 rounded-xl shadow-lg">INICIAR TURNO</button>
-            : <button onClick={() => registrarFichaje('SALIDA')} className="w-full bg-pm-ocre text-white font-bold py-4 rounded-xl shadow-lg">FINALIZAR TURNO</button>}
-            <button onClick={() => setShowFichajeModal(false)} className="text-sm text-gray-400 underline block mx-auto">Cancelar</button>
+          <div className="bg-white w-full max-w-sm rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b pb-3">
+              <h3 className="font-bold text-sm text-gray-800 flex items-center gap-1.5">
+                <CheckSquare size={16} className="text-pm-verde" /> Registro de Ronda Diaria
+              </h3>
+              <button onClick={() => setShowModalRonda(false)} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+            </div>
+
+            <form onSubmit={guardarRegistroRonda} className="space-y-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Zona / Área *</label>
+                <select 
+                  value={rondaFormZona} 
+                  onChange={e => setRondaFormZona(e.target.value)} 
+                  className="w-full border rounded-lg p-2.5 text-xs font-semibold bg-white outline-none focus:border-pm-verde"
+                  required
+                >
+                  {ZONAS_HABITUALES.map(z => (
+                    <option key={z} value={z}>{z}</option>
+                  ))}
+                  <option value="Cuarto Técnico">Cuarto Técnico</option>
+                  <option value="Plaza Central">Plaza Central</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Operario que realizó la ronda *</label>
+                <input 
+                  type="text" 
+                  value={rondaFormOperario} 
+                  onChange={e => setRondaFormOperario(e.target.value)} 
+                  placeholder="Ej: María Gómez, Juan Pérez..." 
+                  className="w-full border rounded-lg p-2.5 text-xs outline-none focus:border-pm-verde" 
+                  required 
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Hora de realización *</label>
+                <input 
+                  type="time" 
+                  value={rondaFormHora} 
+                  onChange={e => setRondaFormHora(e.target.value)} 
+                  className="w-full border rounded-lg p-2.5 text-xs font-mono outline-none focus:border-pm-verde" 
+                  required 
+                />
+              </div>
+
+              <div className="pt-2 flex gap-2">
+                <button 
+                  type="button" 
+                  onClick={() => setShowModalRonda(false)} 
+                  className="w-1/3 py-2.5 rounded-xl border text-xs font-bold text-gray-600 hover:bg-gray-100"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isSubmitting} 
+                  className="w-2/3 py-2.5 rounded-xl bg-pm-verde hover:bg-green-700 text-white text-xs font-bold shadow-md transition"
+                >
+                  {isSubmitting ? 'Guardando...' : 'Confirmar Ronda'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
