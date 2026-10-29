@@ -630,35 +630,28 @@ export function App() {
 
             {/* Accesos rápidos de prueba */}
             <div className="pt-2 border-t">
-              <p className="text-[10px] font-bold text-gray-400 uppercase text-center mb-2">Accesos directos de prueba</p>
-              <div className="grid grid-cols-2 gap-1.5">
+              <p className="text-[10px] font-bold text-gray-400 uppercase text-center mb-2">Selecciona un rol para probar (contraseña: 12345678)</p>
+              <div className="grid grid-cols-3 gap-1.5">
                 <button
                   type="button"
-                  onClick={() => { setLoginEmail('vgarcia@lyc-consultores.com'); setLoginPassword('12345678'); }}
-                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
+                  onClick={() => { setLoginEmail('limpieza@test.com'); setLoginPassword('12345678'); }}
+                  className="bg-pm-verde text-white text-[11px] font-bold py-2 px-1 rounded-lg hover:bg-green-700 transition text-center shadow-sm"
                 >
-                  👑 Virginia (Gerencia)
+                  🧹 Limpieza
                 </button>
                 <button
                   type="button"
                   onClick={() => { setLoginEmail('gerencia@test.com'); setLoginPassword('12345678'); }}
-                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
+                  className="bg-gray-800 text-white text-[11px] font-bold py-2 px-1 rounded-lg hover:bg-gray-900 transition text-center shadow-sm"
                 >
-                  🏢 Gerencia Test
-                </button>
-                <button
-                  type="button"
-                  onClick={() => { setLoginEmail('limpieza@test.com'); setLoginPassword('12345678'); }}
-                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
-                >
-                  🧹 Limpieza Test
+                  🏢 Gerencia
                 </button>
                 <button
                   type="button"
                   onClick={() => { setLoginEmail('seguridad@test.com'); setLoginPassword('12345678'); }}
-                  className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-bold py-1.5 px-2 rounded-lg transition"
+                  className="bg-amber-600 text-white text-[11px] font-bold py-2 px-1 rounded-lg hover:bg-amber-700 transition text-center shadow-sm"
                 >
-                  🛡️ Seguridad Test
+                  🛡️ Seguridad
                 </button>
               </div>
             </div>
