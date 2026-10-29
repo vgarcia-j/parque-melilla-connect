@@ -5,28 +5,31 @@
   "keywords": [],
   "main": "src/index.tsx",
   "dependencies": {
+    "@supabase/supabase-js": "2.118.0",
+    "@yudiel/react-qr-scanner": "2.6.0",
+    "autoprefixer": "10.6.2",
+    "lucide-react": "1.62.0",
+    "postcss": "8.5.32",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-scripts": "^5.0.0",
-    "@supabase/supabase-js": "2.118.0",
     "react-router-dom": "7.18.4",
-    "lucide-react": "1.62.0",
-    "tailwindcss": "4.3.3",
-    "postcss": "8.5.32",
-    "autoprefixer": "10.6.2",
-    "@yudiel/react-qr-scanner": "2.6.0"
+    "tailwindcss": "4.3.3"
   },
   "devDependencies": {
     "@types/react": "19.0.0",
     "@types/react-dom": "19.0.0",
+    "@vitejs/plugin-react": "^6.1.2",
     "loader-utils": "3.2.1",
-    "typescript": "5.7.2"
+    "typescript": "5.7.2",
+    "vite": "^8.3.5"
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "vite build",
     "test": "react-scripts test --env=jsdom",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "dev": "vite",
+    "preview": "vite preview"
   },
   "browserslist": [
     ">0.2%",
